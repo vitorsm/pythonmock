@@ -1,0 +1,4 @@
+
+
+class AnyParameter(object):
+    pass
