@@ -1,7 +1,10 @@
+import inspect
+
 from typing import List, Optional, Generic, TypeVar
 
+from pythonmock.instance import Instance
 from pythonmock.mock_function import MockFunction
-from pythonmock.mock_function_not_found_exception import MockFunctionParameterNotFound
+from pythonmock.mock_function_not_found_exception import MockFunctionNotFoundException
 from pythonmock.mock_function_parameters import MockFunctionParameters
 
 
@@ -9,8 +12,7 @@ class WhenMock(object):
     parameter: MockFunction
 
     def __init__(self, function_name: str):
-        self.parameter = MockFunction()
-        self.parameter.name = function_name
+        self.parameter = MockFunction(function_name)
 
     def with_arguments(self, *args, **kwargs):
         self.parameter.parameter_matcher = MockFunctionParameters(args, kwargs)
@@ -18,44 +20,73 @@ class WhenMock(object):
 
     def then_return(self, object_to_return):
         self.parameter.object_to_return = object_to_return
+        return self
+
+    def then(self, function_to_return: callable):
+        self.parameter.function_to_return = function_to_return
+        return self
+
+    def set_callback(self, function_callback: callable):
+        self.parameter.callback_to_execute = function_callback
+        return self
+
+# T = TypeVar('T')
 
 
-T = TypeVar('T')
-
-
-class Mock(Generic[T]):
+class Mock(object):
 
     functions: List[MockFunction]
+    instance: Optional[Instance]
 
     def __init__(self):
         self.functions = list()
+        self.instance = None
 
-    def get_instance(self) -> T:
-        instance = T()
-        instance.generated_mock = self
+    def get_instance(self):
+        self.instance = Instance()
 
-        for function in self.functions:
-            setattr(instance, function.name,
-                    lambda *args, **kwargs: self.__handle_function_call(function.name, args, kwargs))
+        self.__set_function_to_instance(self.instance)
 
-        return instance
+        return self.instance
+
+    def __set_function_to_instance(self, instance: Instance, index: int = 0):
+        if len(self.functions) <= index:
+            return
+
+        function = self.functions[index]
+
+        setattr(instance, function.name,
+                lambda *args, **kwargs: self.__handle_function_call(function.name, args, kwargs))
+
+        self.__set_function_to_instance(instance, index + 1)
 
     def when(self, function_name: str):
         when_mock = WhenMock(function_name)
         self.functions.append(when_mock.parameter)
-        setattr(self, function_name, lambda *args, **kwargs: self.__handle_function_call(function_name, args, kwargs))
+        self.functions = sorted(self.functions, key=lambda function: function.number_of_any_parameters())
+
+        if self.instance:
+            setattr(self.instance, function_name,
+                    lambda *args, **kwargs: self.__handle_function_call(function_name, args, kwargs))
+
         return when_mock
 
     def __handle_function_call(self, function_name: str, args: Optional[tuple], kwargs: Optional[dict]):
         function = next((f for f in self.functions
-                         if f.name == function_name and f.parameter_matcher.is_match(args, kwargs)), None)
+                         if f.name == function_name and f.is_match(args, kwargs)), None)
 
         if not function:
-            raise MockFunctionParameterNotFound(function_name, args, kwargs)
+            raise MockFunctionNotFoundException(function_name, args, kwargs)
 
         function.add_call(args, kwargs)
 
-        return function.object_to_return
+        if function.callback_to_execute:
+            function.callback_to_execute(*args, **kwargs)
+
+        if function.function_to_return:
+            return function.function_to_return(*args, **kwargs)
+        else:
+            return function.object_to_return
 
     def get_call_quantity_by_parameters(self, function_name: str, *args, **kwargs) -> int:
         return len(self.get_calls_by_parameters(function_name, *args, **kwargs))
@@ -74,7 +105,7 @@ class Mock(Generic[T]):
 
     def get_calls_by_parameters(self, function_name: str, *args, **kwargs) -> List[MockFunctionParameters]:
         function = next((f for f in self.functions
-                         if f.name == function_name and f.parameter_matcher.is_match(args, kwargs)), None)
+                         if f.name == function_name and f.is_match(args, kwargs)), None)
         result = list()
 
         if function:

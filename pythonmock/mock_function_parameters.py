@@ -48,3 +48,9 @@ class MockFunctionParameters(object):
                     return False
 
         return True
+
+    def number_of_any_parameters(self) -> int:
+        qnt = sum(1 if isinstance(a, AnyParameter) else 0 for a in self.args)
+        qnt += sum(1 if isinstance(a, AnyParameter) else 0 for a in self.kwargs.values())
+
+        return qnt

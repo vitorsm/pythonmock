@@ -1,0 +1,4 @@
+
+
+class Instance(object):
+    pass
